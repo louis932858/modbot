@@ -1,26 +1,29 @@
 const {
     Client,
     GatewayIntentBits,
-    PermissionsBitField,
-    ChannelType,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    MessageFlags
+    SlashCommandBuilder,
+    REST,
+    Routes
 } = require("discord.js");
 
-const { token } = require("./config");
+const {
+    joinVoiceChannel,
+    createAudioPlayer,
+    createAudioResource,
+    AudioPlayerStatus
+} = require("@discordjs/voice");
 
-process.on("unhandledRejection", console.log);
-process.on("uncaughtException", console.log);
+const fs = require("fs");
+const { token } = require("./config");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
+/* ---------------- READY ---------------- */
 client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
 });
@@ -30,99 +33,84 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    /* BAN */
-    if (interaction.commandName === "ban") {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.BanMembers))
-            return interaction.reply({ content: "❌ Keine Rechte", flags: MessageFlags.Ephemeral });
+    /* JOIN VOICE */
+    if (interaction.commandName === "join") {
 
-        const user = interaction.options.getMember("user");
-        await user.ban();
+        const channel = interaction.member.voice.channel;
 
-        return interaction.reply("🔨 gebannt");
-    }
+        if (!channel) {
+            return interaction.reply("❌ Du bist in keinem Voice Channel");
+        }
 
-    /* KICK */
-    if (interaction.commandName === "kick") {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.KickMembers))
-            return interaction.reply({ content: "❌ Keine Rechte", flags: MessageFlags.Ephemeral });
-
-        const user = interaction.options.getMember("user");
-        await user.kick();
-
-        return interaction.reply("👢 gekickt");
-    }
-
-    /* TIMEOUT */
-    if (interaction.commandName === "timeout") {
-        const user = interaction.options.getMember("user");
-        const minutes = interaction.options.getInteger("minutes");
-
-        await user.timeout(minutes * 60000);
-
-        return interaction.reply("⏳ timeout gesetzt");
-    }
-
-    /* CLEAR */
-    if (interaction.commandName === "clear") {
-        const amount = interaction.options.getInteger("amount");
-
-        await interaction.channel.bulkDelete(amount, true);
-
-        return interaction.reply({
-            content: "🧹 gelöscht",
-            flags: MessageFlags.Ephemeral
+        joinVoiceChannel({
+            channelId: channel.id,
+            guildId: channel.guild.id,
+            adapterCreator: channel.guild.voiceAdapterCreator,
+            selfDeaf: false
         });
+
+        return interaction.reply(`🎧 Ich bin in ${channel.name}`);
     }
 
-    /* TICKET PANEL */
-    if (interaction.commandName === "ticket") {
+    /* TALK (TTS SIMPLE) */
+    if (interaction.commandName === "say") {
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId("ticket_open")
-                .setLabel("🎫 Ticket erstellen")
-                .setStyle(ButtonStyle.Primary)
-        );
+        const text = interaction.options.getString("text");
 
-        return interaction.reply({
-            content: "Support Tickets",
-            components: [row]
+        const channel = interaction.member.voice.channel;
+        if (!channel) return interaction.reply("❌ Kein Voice Channel");
+
+        const connection = joinVoiceChannel({
+            channelId: channel.id,
+            guildId: channel.guild.id,
+            adapterCreator: channel.guild.voiceAdapterCreator,
+            selfDeaf: false
         });
+
+        const player = createAudioPlayer();
+
+        // einfache TTS Datei (Fake Voice via URL)
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=de&client=tw-ob`;
+
+        const resource = createAudioResource(url);
+
+        connection.subscribe(player);
+        player.play(resource);
+
+        return interaction.reply("🗣️ Ich spreche jetzt!");
     }
 });
 
-/* ---------------- BUTTONS ---------------- */
-client.on("interactionCreate", async (interaction) => {
+/* ---------------- REGISTER COMMANDS ---------------- */
+async function deploy() {
 
-    if (!interaction.isButton()) return;
+    const commands = [
+        new SlashCommandBuilder()
+            .setName("join")
+            .setDescription("Bot joint deinem Voice Channel"),
 
-    if (interaction.customId === "ticket_open") {
+        new SlashCommandBuilder()
+            .setName("say")
+            .setDescription("Bot spricht Text")
+            .addStringOption(o =>
+                o.setName("text")
+                    .setDescription("Text zum sprechen")
+                    .setRequired(true)
+            )
+    ].map(c => c.toJSON());
 
-        const channel = await interaction.guild.channels.create({
-            name: `ticket-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-            permissionOverwrites: [
-                {
-                    id: interaction.guild.id,
-                    deny: [PermissionsBitField.Flags.ViewChannel]
-                },
-                {
-                    id: interaction.user.id,
-                    allow: [
-                        PermissionsBitField.Flags.ViewChannel,
-                        PermissionsBitField.Flags.SendMessages
-                    ]
-                }
-            ]
-        });
+    const rest = new REST({ version: "10" }).setToken(token);
 
-        await channel.send(`Hallo ${interaction.user}, beschreibe dein Problem.`);
+    const app = await rest.get(Routes.oauth2CurrentApplication());
 
-        return interaction.reply({
-            content: `Ticket erstellt: ${channel}`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-});
+    await rest.put(
+        Routes.applicationCommands(app.id),
+        { body: commands }
+    );
+
+    console.log("✅ Commands registriert");
+}
+
+deploy();
 
 client.login(token);
