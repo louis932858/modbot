@@ -1,19 +1,9 @@
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { token } = require("./config");
 
+const GUILD_ID = "1496179321704943776";
+
 const commands = [
-    new SlashCommandBuilder()
-        .setName("play")
-        .setDescription("Musik abspielen")
-        .addStringOption(o =>
-            o.setName("song")
-            .setDescription("Song Name")
-            .setRequired(true)
-        ),
-
-    new SlashCommandBuilder().setName("skip").setDescription("Skip Song"),
-    new SlashCommandBuilder().setName("stop").setDescription("Stop Musik"),
-
     new SlashCommandBuilder()
         .setName("ban")
         .setDescription("User bannen")
@@ -26,26 +16,30 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName("timeout")
-        .setDescription("User muten")
+        .setDescription("User timeout")
         .addUserOption(o => o.setName("user").setRequired(true))
         .addIntegerOption(o => o.setName("minutes").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("clear")
-        .setDescription("Chats löschen")
-        .addIntegerOption(o => o.setName("amount").setRequired(true))
+        .setDescription("Chat löschen")
+        .addIntegerOption(o => o.setName("amount").setRequired(true)),
 
+    new SlashCommandBuilder()
+        .setName("ticket")
+        .setDescription("Ticket Panel senden")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(token);
 
 (async () => {
-    const app = await rest.get(Routes.oauth2CurrentApplication());
-
     await rest.put(
-        Routes.applicationCommands(app.id),
+        Routes.applicationGuildCommands(
+            (await rest.get(Routes.oauth2CurrentApplication())).id,
+            GUILD_ID
+        ),
         { body: commands }
     );
 
-    console.log("✅ Slash Commands registriert");
+    console.log("✅ Commands registriert");
 })();
