@@ -2,28 +2,42 @@ const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { token } = require("./config");
 
 const commands = [
-    new SlashCommandBuilder().setName("ticketpanel").setDescription("Ticket Panel senden"),
 
+    // 🎵 MUSIC
+    new SlashCommandBuilder()
+        .setName("play")
+        .setDescription("Musik abspielen")
+        .addStringOption(o =>
+            o.setName("song")
+            .setDescription("Song Name")
+            .setRequired(true)
+        ),
+
+    new SlashCommandBuilder().setName("skip").setDescription("Skip Song"),
+    new SlashCommandBuilder().setName("stop").setDescription("Stop Musik"),
+
+    // 🔨 MODERATION
     new SlashCommandBuilder()
         .setName("ban")
-        .setDescription("User bannen")
+        .setDescription("Ban User")
         .addUserOption(o => o.setName("user").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("kick")
-        .setDescription("User kicken")
+        .setDescription("Kick User")
         .addUserOption(o => o.setName("user").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("timeout")
-        .setDescription("User muten")
+        .setDescription("Timeout User")
         .addUserOption(o => o.setName("user").setRequired(true))
         .addIntegerOption(o => o.setName("minutes").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("clear")
-        .setDescription("Nachrichten löschen")
+        .setDescription("Chats löschen")
         .addIntegerOption(o => o.setName("amount").setRequired(true))
+
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(token);
