@@ -10,7 +10,6 @@ const {
 const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
 
 const TOKEN = process.env.TOKEN;
-const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
 
 const client = new Client({
     intents: [
@@ -23,64 +22,54 @@ const client = new Client({
 /* ---------------- READY ---------------- */
 client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
-
-    // 🎧 Bot joint automatisch Voice Channel
-    const guild = client.guilds.cache.first();
-
-    if (!guild) return;
-
-    const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
-
-    if (channel) {
-        joinVoiceChannel({
-            channelId: channel.id,
-            guildId: guild.id,
-            adapterCreator: guild.voiceAdapterCreator,
-            selfDeaf: false
-        });
-
-        console.log("🎧 Bot im Voice Channel");
-    }
 });
 
-/* ---------------- VOICE TRACKING ---------------- */
-client.on("voiceStateUpdate", async (oldState, newState) => {
-
-    const guild = newState.guild;
-    const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
-
-    if (!channel) return;
-
-    // 👤 jemand geht in Call
-    if (newState.channelId === VOICE_CHANNEL_ID && oldState.channelId !== VOICE_CHANNEL_ID) {
-
-        const connection = joinVoiceChannel({
-            channelId: VOICE_CHANNEL_ID,
-            guildId: guild.id,
-            adapterCreator: guild.voiceAdapterCreator,
-            selfDeaf: false
-        });
-
-        console.log(`🎧 ${newState.member.user.tag} im Call`);
-    }
-
-    // 👤 Call leer → Bot geht raus
-    if (oldState.channelId === VOICE_CHANNEL_ID && newState.channelId !== VOICE_CHANNEL_ID) {
-
-        if (channel.members.size === 0) {
-            const conn = getVoiceConnection(guild.id);
-            if (conn) conn.destroy();
-
-            console.log("🔇 Call leer → Bot raus");
-        }
-    }
-});
-
-/* ---------------- /listrole ---------------- */
+/* ---------------- COMMANDS ---------------- */
 client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
 
+    /* ---------------- /JOIN ---------------- */
+    if (interaction.commandName === "join") {
+
+        const voiceChannel = interaction.member.voice.channel;
+
+        if (!voiceChannel) {
+            return interaction.reply({
+                content: "❌ Du musst in einem Voice Channel sein!",
+                ephemeral: true
+            });
+        }
+
+        // Bot joint den Channel der Person
+        joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: voiceChannel.guild.id,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            selfDeaf: false
+        });
+
+        return interaction.reply(`🎧 Ich bin jetzt in **${voiceChannel.name}**`);
+    }
+
+    /* ---------------- /LEAVE (optional) ---------------- */
+    if (interaction.commandName === "leave") {
+
+        const conn = getVoiceConnection(interaction.guild.id);
+
+        if (!conn) {
+            return interaction.reply({
+                content: "❌ Ich bin in keinem Voice Channel",
+                ephemeral: true
+            });
+        }
+
+        conn.destroy();
+
+        return interaction.reply("👋 Voice verlassen");
+    }
+
+    /* ---------------- /LISTROLE ---------------- */
     if (interaction.commandName === "listrole") {
 
         await interaction.guild.members.fetch();
@@ -90,7 +79,7 @@ client.on("interactionCreate", async (interaction) => {
             .sort((a, b) => b.position - a.position);
 
         const embed = new EmbedBuilder()
-            .setTitle("📋 Rollen + Mitglieder Übersicht")
+            .setTitle("📋 Rollen Übersicht")
             .setColor("Blue");
 
         let desc = "";
@@ -118,10 +107,18 @@ client.on("interactionCreate", async (interaction) => {
     }
 });
 
-/* ---------------- REGISTER COMMAND ---------------- */
+/* ---------------- REGISTER COMMANDS ---------------- */
 async function deploy() {
 
     const commands = [
+        new SlashCommandBuilder()
+            .setName("join")
+            .setDescription("Bot joint deinen Voice Channel"),
+
+        new SlashCommandBuilder()
+            .setName("leave")
+            .setDescription("Bot verlässt Voice Channel"),
+
         new SlashCommandBuilder()
             .setName("listrole")
             .setDescription("Zeigt alle Rollen + Mitglieder")
@@ -136,7 +133,7 @@ async function deploy() {
         { body: commands }
     );
 
-    console.log("✅ Command registriert");
+    console.log("✅ Commands registriert");
 }
 
 deploy();
