@@ -2,161 +2,124 @@ const {
     Client,
     GatewayIntentBits,
     PermissionsBitField,
+    ChannelType,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
     MessageFlags
 } = require("discord.js");
 
-const {
-    joinVoiceChannel,
-    createAudioPlayer,
-    createAudioResource,
-    getVoiceConnection
-} = require("@discordjs/voice");
-
-const play = require("play-dl");
 const { token } = require("./config");
+
+process.on("unhandledRejection", console.log);
+process.on("uncaughtException", console.log);
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildMessages
     ]
 });
 
-// 🎵 Queue System
-const queue = new Map();
-
 client.once("clientReady", () => {
-    console.log(`${client.user.tag} ist online!`);
+    console.log(`${client.user.tag} online`);
 });
 
-/* ---------------- MUSIC ---------------- */
-async function playSong(guildId, song, interaction) {
-    const serverQueue = queue.get(guildId);
-    if (!serverQueue) return;
-
-    const stream = await play.stream(song.url);
-    const resource = createAudioResource(stream.stream, {
-        inputType: stream.type
-    });
-
-    serverQueue.player.play(resource);
-
-    serverQueue.player.once("idle", () => {
-        queue.delete(guildId);
-    });
-}
-
-/* ---------------- INTERACTIONS ---------------- */
-client.on("interactionCreate", async interaction => {
+/* ---------------- COMMANDS ---------------- */
+client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    const guildId = interaction.guild.id;
-
-    /* -------- PLAY -------- */
-    if (interaction.commandName === "play") {
-
-        const voice = interaction.member.voice.channel;
-
-        if (!voice) {
-            return interaction.reply({
-                content: "❌ Du bist in keinem Voice Channel",
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        const query = interaction.options.getString("song");
-
-        const search = await play.search(query, { limit: 1 });
-        if (!search.length) {
-            return interaction.reply({
-                content: "❌ Kein Song gefunden",
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        const song = search[0];
-
-        const player = createAudioPlayer();
-
-        queue.set(guildId, {
-            player,
-            voiceChannel: voice
-        });
-
-        const connection = joinVoiceChannel({
-            channelId: voice.id,
-            guildId: guildId,
-            adapterCreator: voice.guild.voiceAdapterCreator
-        });
-
-        connection.subscribe(player);
-
-        await playSong(guildId, song, interaction);
-
-        return interaction.reply(`🎵 Jetzt spielt: **${song.title}**`);
-    }
-
-    /* -------- SKIP -------- */
-    if (interaction.commandName === "skip") {
-        const conn = getVoiceConnection(guildId);
-
-        if (!conn) {
-            return interaction.reply("❌ Nichts spielt");
-        }
-
-        conn.state.subscription.player.stop();
-        return interaction.reply("⏭️ Skip");
-    }
-
-    /* -------- STOP -------- */
-    if (interaction.commandName === "stop") {
-        const conn = getVoiceConnection(guildId);
-
-        if (conn) conn.destroy();
-
-        queue.delete(guildId);
-        return interaction.reply("⏹️ Stop");
-    }
-
-    /* -------- MODERATION -------- */
-
+    /* BAN */
     if (interaction.commandName === "ban") {
         if (!interaction.member.permissions.has(PermissionsBitField.Flags.BanMembers))
-            return interaction.reply("❌ Keine Rechte");
+            return interaction.reply({ content: "❌ Keine Rechte", flags: MessageFlags.Ephemeral });
 
         const user = interaction.options.getMember("user");
         await user.ban();
 
-        return interaction.reply("🔨 Gebannt");
+        return interaction.reply("🔨 gebannt");
     }
 
+    /* KICK */
     if (interaction.commandName === "kick") {
         if (!interaction.member.permissions.has(PermissionsBitField.Flags.KickMembers))
-            return interaction.reply("❌ Keine Rechte");
+            return interaction.reply({ content: "❌ Keine Rechte", flags: MessageFlags.Ephemeral });
 
         const user = interaction.options.getMember("user");
         await user.kick();
 
-        return interaction.reply("👢 Gekickt");
+        return interaction.reply("👢 gekickt");
     }
 
+    /* TIMEOUT */
     if (interaction.commandName === "timeout") {
         const user = interaction.options.getMember("user");
         const minutes = interaction.options.getInteger("minutes");
 
         await user.timeout(minutes * 60000);
 
-        return interaction.reply("⏳ Timeout gesetzt");
+        return interaction.reply("⏳ timeout gesetzt");
     }
 
+    /* CLEAR */
     if (interaction.commandName === "clear") {
         const amount = interaction.options.getInteger("amount");
 
         await interaction.channel.bulkDelete(amount, true);
 
         return interaction.reply({
-            content: "🧹 Chat gelöscht",
+            content: "🧹 gelöscht",
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    /* TICKET PANEL */
+    if (interaction.commandName === "ticket") {
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId("ticket_open")
+                .setLabel("🎫 Ticket erstellen")
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        return interaction.reply({
+            content: "Support Tickets",
+            components: [row]
+        });
+    }
+});
+
+/* ---------------- BUTTONS ---------------- */
+client.on("interactionCreate", async (interaction) => {
+
+    if (!interaction.isButton()) return;
+
+    if (interaction.customId === "ticket_open") {
+
+        const channel = await interaction.guild.channels.create({
+            name: `ticket-${interaction.user.username}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                {
+                    id: interaction.guild.id,
+                    deny: [PermissionsBitField.Flags.ViewChannel]
+                },
+                {
+                    id: interaction.user.id,
+                    allow: [
+                        PermissionsBitField.Flags.ViewChannel,
+                        PermissionsBitField.Flags.SendMessages
+                    ]
+                }
+            ]
+        });
+
+        await channel.send(`Hallo ${interaction.user}, beschreibe dein Problem.`);
+
+        return interaction.reply({
+            content: `Ticket erstellt: ${channel}`,
             flags: MessageFlags.Ephemeral
         });
     }
