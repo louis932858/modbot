@@ -19,6 +19,9 @@ const client = new Client({
     ]
 });
 
+/* ---------------- MEMORY (TEMP STORAGE) ---------------- */
+const guildConfig = new Map();
+
 /* ---------------- READY ---------------- */
 client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
@@ -29,44 +32,29 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    /* ---------------- /JOIN ---------------- */
-    if (interaction.commandName === "join") {
+    const guildId = interaction.guild.id;
 
-        const voiceChannel = interaction.member.voice.channel;
+    /* ---------------- /CONFIG ---------------- */
+    if (interaction.commandName === "config") {
 
-        if (!voiceChannel) {
-            return interaction.reply({
-                content: "❌ Du musst in einem Voice Channel sein!",
-                ephemeral: true
-            });
+        const role = interaction.options.getRole("role");
+
+        if (!guildConfig.has(guildId)) {
+            guildConfig.set(guildId, []);
         }
 
-        // Bot joint den Channel der Person
-        joinVoiceChannel({
-            channelId: voiceChannel.id,
-            guildId: voiceChannel.guild.id,
-            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-            selfDeaf: false
+        const list = guildConfig.get(guildId);
+
+        if (!list.includes(role.id)) {
+            list.push(role.id);
+        }
+
+        guildConfig.set(guildId, list);
+
+        return interaction.reply({
+            content: `⚙️ Rolle **${role.name}** wurde zur Liste hinzugefügt`,
+            ephemeral: true
         });
-
-        return interaction.reply(`🎧 Ich bin jetzt in **${voiceChannel.name}**`);
-    }
-
-    /* ---------------- /LEAVE (optional) ---------------- */
-    if (interaction.commandName === "leave") {
-
-        const conn = getVoiceConnection(interaction.guild.id);
-
-        if (!conn) {
-            return interaction.reply({
-                content: "❌ Ich bin in keinem Voice Channel",
-                ephemeral: true
-            });
-        }
-
-        conn.destroy();
-
-        return interaction.reply("👋 Voice verlassen");
     }
 
     /* ---------------- /LISTROLE ---------------- */
@@ -74,17 +62,22 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.guild.members.fetch();
 
-        const roles = interaction.guild.roles.cache
-            .filter(r => r.name !== "@everyone")
-            .sort((a, b) => b.position - a.position);
+        const allowedRoles = guildConfig.get(guildId) || [];
+
+        if (allowedRoles.length === 0) {
+            return interaction.reply("❌ Keine Rollen konfiguriert. Nutze /config");
+        }
 
         const embed = new EmbedBuilder()
-            .setTitle("📋 Rollen Übersicht")
+            .setTitle("📋 Team Rollen Übersicht")
             .setColor("Blue");
 
         let desc = "";
 
-        roles.forEach(role => {
+        for (const roleId of allowedRoles) {
+
+            const role = interaction.guild.roles.cache.get(roleId);
+            if (!role) continue;
 
             const members = role.members.map(m => m.user.tag);
 
@@ -95,15 +88,43 @@ client.on("interactionCreate", async (interaction) => {
             } else {
                 desc += "• Niemand\n";
             }
-        });
-
-        if (desc.length > 4000) {
-            desc = desc.slice(0, 4000) + "\n...gekürzt";
         }
 
-        embed.setDescription(desc);
+        embed.setDescription(desc || "Keine Daten");
 
         return interaction.reply({ embeds: [embed] });
+    }
+
+    /* ---------------- /JOIN ---------------- */
+    if (interaction.commandName === "join") {
+
+        const voiceChannel = interaction.member.voice.channel;
+
+        if (!voiceChannel) {
+            return interaction.reply({
+                content: "❌ Du bist in keinem Voice Channel!",
+                ephemeral: true
+            });
+        }
+
+        joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: voiceChannel.guild.id,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            selfDeaf: false
+        });
+
+        return interaction.reply(`🎧 Ich bin in **${voiceChannel.name}**`);
+    }
+
+    /* ---------------- /LEAVE ---------------- */
+    if (interaction.commandName === "leave") {
+
+        const conn = getVoiceConnection(interaction.guild.id);
+
+        if (conn) conn.destroy();
+
+        return interaction.reply("👋 Voice verlassen");
     }
 });
 
@@ -112,16 +133,25 @@ async function deploy() {
 
     const commands = [
         new SlashCommandBuilder()
+            .setName("config")
+            .setDescription("Füge eine Rolle zur Teamliste hinzu")
+            .addRoleOption(o =>
+                o.setName("role")
+                    .setDescription("Rolle auswählen")
+                    .setRequired(true)
+            ),
+
+        new SlashCommandBuilder()
+            .setName("listrole")
+            .setDescription("Zeigt konfigurierte Team Rollen"),
+
+        new SlashCommandBuilder()
             .setName("join")
             .setDescription("Bot joint deinen Voice Channel"),
 
         new SlashCommandBuilder()
             .setName("leave")
-            .setDescription("Bot verlässt Voice Channel"),
-
-        new SlashCommandBuilder()
-            .setName("listrole")
-            .setDescription("Zeigt alle Rollen + Mitglieder")
+            .setDescription("Bot verlässt Voice Channel")
     ].map(c => c.toJSON());
 
     const rest = new REST({ version: "10" }).setToken(TOKEN);
