@@ -2,8 +2,6 @@ const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { token } = require("./config");
 
 const commands = [
-
-    // 🎵 MUSIC
     new SlashCommandBuilder()
         .setName("play")
         .setDescription("Musik abspielen")
@@ -16,20 +14,19 @@ const commands = [
     new SlashCommandBuilder().setName("skip").setDescription("Skip Song"),
     new SlashCommandBuilder().setName("stop").setDescription("Stop Musik"),
 
-    // 🔨 MODERATION
     new SlashCommandBuilder()
         .setName("ban")
-        .setDescription("Ban User")
+        .setDescription("User bannen")
         .addUserOption(o => o.setName("user").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("kick")
-        .setDescription("Kick User")
+        .setDescription("User kicken")
         .addUserOption(o => o.setName("user").setRequired(true)),
 
     new SlashCommandBuilder()
         .setName("timeout")
-        .setDescription("Timeout User")
+        .setDescription("User muten")
         .addUserOption(o => o.setName("user").setRequired(true))
         .addIntegerOption(o => o.setName("minutes").setRequired(true)),
 
@@ -50,5 +47,5 @@ const rest = new REST({ version: "10" }).setToken(token);
         { body: commands }
     );
 
-    console.log("✅ Commands deployed");
+    console.log("✅ Slash Commands registriert");
 })();
