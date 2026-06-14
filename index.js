@@ -1,17 +1,19 @@
 const {
     Client,
     GatewayIntentBits,
-    REST,
-    Routes,
-    SlashCommandBuilder
+    PermissionsBitField
 } = require("discord.js");
 
 const {
     joinVoiceChannel,
+    createAudioPlayer,
+    createAudioResource,
+    AudioPlayerStatus,
     getVoiceConnection
 } = require("@discordjs/voice");
 
-const TOKEN = process.env.TOKEN;
+const play = require("play-dl");
+const { token } = require("./config");
 
 const client = new Client({
     intents: [
@@ -20,79 +22,122 @@ const client = new Client({
     ]
 });
 
-client.once("ready", async () => {
-    console.log(`${client.user.tag} ist online!`);
+// 🎵 Music Queue
+const queue = new Map();
 
-    try {
-        const app = await client.application.fetch();
-
-        const commands = [
-            new SlashCommandBuilder()
-                .setName("join")
-                .setDescription("Joint deinem Sprachkanal"),
-
-            new SlashCommandBuilder()
-                .setName("leave")
-                .setDescription("Verlässt den Sprachkanal")
-        ];
-
-        const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-        await rest.put(
-            Routes.applicationCommands(app.id),
-            {
-                body: commands.map(cmd => cmd.toJSON())
-            }
-        );
-
-        console.log("✅ Slash Commands registriert");
-    } catch (err) {
-        console.error(err);
-    }
+client.once("ready", () => {
+    console.log(`${client.user.tag} ist online`);
 });
+
+/* ---------------- MUSIC ---------------- */
+async function playSong(guild, song) {
+    const serverQueue = queue.get(guild.id);
+
+    const stream = await play.stream(song.url);
+    const resource = createAudioResource(stream.stream, {
+        inputType: stream.type
+    });
+
+    serverQueue.player.play(resource);
+}
 
 client.on("interactionCreate", async interaction => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    if (interaction.commandName === "join") {
+    const guildId = interaction.guild.id;
+
+    /* ---------------- PLAY ---------------- */
+    if (interaction.commandName === "play") {
 
         const voiceChannel = interaction.member.voice.channel;
-
         if (!voiceChannel) {
-            return interaction.reply({
-                content: "❌ Du musst in einem Sprachkanal sein.",
-                ephemeral: true
-            });
+            return interaction.reply("❌ Du bist in keinem Voice Channel");
         }
 
-        joinVoiceChannel({
+        const songName = interaction.options.getString("song");
+
+        const search = await play.search(songName, { limit: 1 });
+        if (!search.length) return interaction.reply("❌ Nichts gefunden");
+
+        const song = search[0];
+
+        const player = createAudioPlayer();
+
+        const serverQueue = {
+            voiceChannel,
+            player,
+            songs: [song],
+            playing: true
+        };
+
+        queue.set(guildId, serverQueue);
+
+        const connection = joinVoiceChannel({
             channelId: voiceChannel.id,
-            guildId: voiceChannel.guild.id,
-            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-            selfDeaf: false
+            guildId: guildId,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator
         });
 
-        return interaction.reply(
-            `✅ Sprachkanal **${voiceChannel.name}** beigetreten.`
-        );
+        connection.subscribe(player);
+
+        await playSong(interaction.guild, song);
+
+        player.on(AudioPlayerStatus.Idle, () => {
+            queue.delete(guildId);
+        });
+
+        return interaction.reply(`🎵 Spiele: **${song.title}**`);
     }
 
-    if (interaction.commandName === "leave") {
+    /* ---------------- SKIP ---------------- */
+    if (interaction.commandName === "skip") {
+        const serverQueue = queue.get(guildId);
+        if (!serverQueue) return interaction.reply("❌ Nichts spielt");
 
-        const connection = getVoiceConnection(interaction.guild.id);
+        serverQueue.player.stop();
+        return interaction.reply("⏭️ Skip");
+    }
 
-        if (!connection) {
-            return interaction.reply({
-                content: "❌ Ich bin in keinem Sprachkanal.",
-                ephemeral: true
-            });
-        }
+    /* ---------------- STOP ---------------- */
+    if (interaction.commandName === "stop") {
+        const connection = getVoiceConnection(guildId);
+        if (connection) connection.destroy();
 
-        connection.destroy();
+        queue.delete(guildId);
+        return interaction.reply("⏹️ Stopped");
+    }
 
-        return interaction.reply("👋 Sprachkanal verlassen.");
+    /* ---------------- MODERATION ---------------- */
+
+    if (!interaction.member.permissions) return;
+
+    if (interaction.commandName === "ban") {
+        const user = interaction.options.getMember("user");
+        await user.ban();
+        return interaction.reply("🔨 Banned");
+    }
+
+    if (interaction.commandName === "kick") {
+        const user = interaction.options.getMember("user");
+        await user.kick();
+        return interaction.reply("👢 Kicked");
+    }
+
+    if (interaction.commandName === "timeout") {
+        const user = interaction.options.getMember("user");
+        const minutes = interaction.options.getInteger("minutes");
+
+        await user.timeout(minutes * 60000);
+        return interaction.reply("⏳ Timeout gesetzt");
+    }
+
+    if (interaction.commandName === "clear") {
+        const amount = interaction.options.getInteger("amount");
+
+        await interaction.channel.bulkDelete(amount, true);
+        return interaction.reply({ content: "🧹 gelöscht", ephemeral: true });
     }
 });
 
-client.login(TOKEN);
+client.login(token);
