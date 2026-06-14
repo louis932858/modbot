@@ -1,98 +1,36 @@
 const {
     Client,
     GatewayIntentBits,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle
+    SlashCommandBuilder,
+    REST,
+    Routes
 } = require("discord.js");
 
 const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
 
+const TOKEN = process.env.TOKEN;
+const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
+const TEXT_CHANNEL_ID = process.env.TEXT_CHANNEL_ID;
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-/* ---------------- ENV ---------------- */
-const TOKEN = process.env.TOKEN;
-
-const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID;
-const UNVERIFIED_ROLE_ID = process.env.UNVERIFIED_ROLE_ID;
-const VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID;
-
-const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
-const TEXT_CHANNEL_ID = process.env.TEXT_CHANNEL_ID;
-const ROLE_MENTION_ID = process.env.ROLE_MENTION_ID;
-
 /* ---------------- READY ---------------- */
-client.once("clientReady", async () => {
+client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
-
-    // 🔐 Verification Button senden
-    const channel = await client.channels.fetch(VERIFY_CHANNEL_ID);
-
-    if (channel) {
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId("verify_btn")
-                .setLabel("✅ Verifizieren")
-                .setStyle(ButtonStyle.Success)
-        );
-
-        channel.send({
-            content: "🔐 Klicke um dich zu verifizieren",
-            components: [row]
-        });
-    }
-
-    // 🎧 Auto Join Voice
-    const voice = await client.channels.fetch(VOICE_CHANNEL_ID);
-
-    if (voice) {
-        joinVoiceChannel({
-            channelId: voice.id,
-            guildId: voice.guild.id,
-            adapterCreator: voice.guild.voiceAdapterCreator,
-            selfDeaf: false
-        });
-
-        console.log("🎧 Bot im Voice Channel");
-    }
 });
 
-/* ---------------- VERIFICATION ---------------- */
-client.on("interactionCreate", async (interaction) => {
-
-    if (!interaction.isButton()) return;
-
-    if (interaction.customId === "verify_btn") {
-
-        const member = interaction.member;
-
-        try {
-            await member.roles.remove(UNVERIFIED_ROLE_ID);
-            await member.roles.add(VERIFIED_ROLE_ID);
-
-            return interaction.reply({
-                content: "✅ Du bist jetzt verifiziert!",
-                ephemeral: true
-            });
-
-        } catch (err) {
-            console.log(err);
-        }
-    }
-});
-
-/* ---------------- VOICE TRACKING ---------------- */
+/* ---------------- VOICE FOLLOW SYSTEM ---------------- */
 client.on("voiceStateUpdate", async (oldState, newState) => {
 
     const textChannel = await client.channels.fetch(TEXT_CHANNEL_ID);
 
-    // 👤 User geht in Target Call
+    // User geht in Call → Bot joint
     if (newState.channelId === VOICE_CHANNEL_ID && oldState.channelId !== VOICE_CHANNEL_ID) {
 
         joinVoiceChannel({
@@ -103,15 +41,11 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         });
 
         if (textChannel) {
-            textChannel.send(
-                `🎧 <@&${ROLE_MENTION_ID}> ${newState.member.user.tag} ist im Call!`
-            );
+            textChannel.send(`🎧 ${newState.member.user.tag} ist im Voice!`);
         }
-
-        console.log("➡️ Follow Voice");
     }
 
-    // 👤 User verlässt Call
+    // Call leer → Bot geht raus
     if (oldState.channelId === VOICE_CHANNEL_ID && newState.channelId !== VOICE_CHANNEL_ID) {
 
         const channel = oldState.guild.channels.cache.get(VOICE_CHANNEL_ID);
@@ -122,13 +56,61 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             if (conn) conn.destroy();
 
             if (textChannel) {
-                textChannel.send("🔇 Call leer → Bot geht raus");
+                textChannel.send("🔇 Voice leer → Bot verlässt Call");
             }
-
-            console.log("⬅️ Bot left Voice");
         }
     }
 });
 
-/* ---------------- LOGIN ---------------- */
+/* ---------------- COMMAND HANDLING ---------------- */
+client.on("interactionCreate", async (interaction) => {
+
+    if (!interaction.isChatInputCommand()) return;
+
+    /* ---------------- /listrole ---------------- */
+    if (interaction.commandName === "listrole") {
+
+        const role = interaction.options.getRole("role");
+
+        if (!role) {
+            return interaction.reply("❌ Rolle nicht gefunden");
+        }
+
+        const members = role.members.map(m => `• ${m.user.tag}`).join("\n");
+
+        return interaction.reply({
+            content: `📋 **Mitglieder mit Rolle ${role.name}:**\n\n${members || "Niemand hat diese Rolle"}`,
+            ephemeral: false
+        });
+    }
+});
+
+/* ---------------- REGISTER COMMANDS ---------------- */
+async function deploy() {
+
+    const commands = [
+        new SlashCommandBuilder()
+            .setName("listrole")
+            .setDescription("Zeigt alle User mit einer Rolle")
+            .addRoleOption(o =>
+                o.setName("role")
+                    .setDescription("Rolle auswählen")
+                    .setRequired(true)
+            )
+    ].map(c => c.toJSON());
+
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+    const app = await rest.get(Routes.oauth2CurrentApplication());
+
+    await rest.put(
+        Routes.applicationCommands(app.id),
+        { body: commands }
+    );
+
+    console.log("✅ Commands registriert");
+}
+
+deploy();
+
 client.login(TOKEN);
