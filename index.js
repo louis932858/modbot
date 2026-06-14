@@ -3,100 +3,128 @@ const {
     GatewayIntentBits,
     SlashCommandBuilder,
     REST,
-    Routes
+    Routes,
+    EmbedBuilder
 } = require("discord.js");
 
 const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
 
 const TOKEN = process.env.TOKEN;
 const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
-const TEXT_CHANNEL_ID = process.env.TEXT_CHANNEL_ID;
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
 /* ---------------- READY ---------------- */
 client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
-});
 
-/* ---------------- VOICE FOLLOW SYSTEM ---------------- */
-client.on("voiceStateUpdate", async (oldState, newState) => {
+    // 🎧 Bot joint automatisch Voice Channel
+    const guild = client.guilds.cache.first();
 
-    const textChannel = await client.channels.fetch(TEXT_CHANNEL_ID);
+    if (!guild) return;
 
-    // User geht in Call → Bot joint
-    if (newState.channelId === VOICE_CHANNEL_ID && oldState.channelId !== VOICE_CHANNEL_ID) {
+    const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
 
+    if (channel) {
         joinVoiceChannel({
-            channelId: VOICE_CHANNEL_ID,
-            guildId: newState.guild.id,
-            adapterCreator: newState.guild.voiceAdapterCreator,
+            channelId: channel.id,
+            guildId: guild.id,
+            adapterCreator: guild.voiceAdapterCreator,
             selfDeaf: false
         });
 
-        if (textChannel) {
-            textChannel.send(`🎧 ${newState.member.user.tag} ist im Voice!`);
-        }
+        console.log("🎧 Bot im Voice Channel");
+    }
+});
+
+/* ---------------- VOICE TRACKING ---------------- */
+client.on("voiceStateUpdate", async (oldState, newState) => {
+
+    const guild = newState.guild;
+    const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+
+    if (!channel) return;
+
+    // 👤 jemand geht in Call
+    if (newState.channelId === VOICE_CHANNEL_ID && oldState.channelId !== VOICE_CHANNEL_ID) {
+
+        const connection = joinVoiceChannel({
+            channelId: VOICE_CHANNEL_ID,
+            guildId: guild.id,
+            adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: false
+        });
+
+        console.log(`🎧 ${newState.member.user.tag} im Call`);
     }
 
-    // Call leer → Bot geht raus
+    // 👤 Call leer → Bot geht raus
     if (oldState.channelId === VOICE_CHANNEL_ID && newState.channelId !== VOICE_CHANNEL_ID) {
 
-        const channel = oldState.guild.channels.cache.get(VOICE_CHANNEL_ID);
-
-        if (channel && channel.members.size === 0) {
-
-            const conn = getVoiceConnection(oldState.guild.id);
+        if (channel.members.size === 0) {
+            const conn = getVoiceConnection(guild.id);
             if (conn) conn.destroy();
 
-            if (textChannel) {
-                textChannel.send("🔇 Voice leer → Bot verlässt Call");
-            }
+            console.log("🔇 Call leer → Bot raus");
         }
     }
 });
 
-/* ---------------- COMMAND HANDLING ---------------- */
+/* ---------------- /listrole ---------------- */
 client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    /* ---------------- /listrole ---------------- */
     if (interaction.commandName === "listrole") {
 
-        const role = interaction.options.getRole("role");
+        await interaction.guild.members.fetch();
 
-        if (!role) {
-            return interaction.reply("❌ Rolle nicht gefunden");
+        const roles = interaction.guild.roles.cache
+            .filter(r => r.name !== "@everyone")
+            .sort((a, b) => b.position - a.position);
+
+        const embed = new EmbedBuilder()
+            .setTitle("📋 Rollen + Mitglieder Übersicht")
+            .setColor("Blue");
+
+        let desc = "";
+
+        roles.forEach(role => {
+
+            const members = role.members.map(m => m.user.tag);
+
+            desc += `\n**🔹 ${role.name} (${role.members.size})**\n`;
+
+            if (members.length > 0) {
+                desc += members.map(u => `• ${u}`).join("\n") + "\n";
+            } else {
+                desc += "• Niemand\n";
+            }
+        });
+
+        if (desc.length > 4000) {
+            desc = desc.slice(0, 4000) + "\n...gekürzt";
         }
 
-        const members = role.members.map(m => `• ${m.user.tag}`).join("\n");
+        embed.setDescription(desc);
 
-        return interaction.reply({
-            content: `📋 **Mitglieder mit Rolle ${role.name}:**\n\n${members || "Niemand hat diese Rolle"}`,
-            ephemeral: false
-        });
+        return interaction.reply({ embeds: [embed] });
     }
 });
 
-/* ---------------- REGISTER COMMANDS ---------------- */
+/* ---------------- REGISTER COMMAND ---------------- */
 async function deploy() {
 
     const commands = [
         new SlashCommandBuilder()
             .setName("listrole")
-            .setDescription("Zeigt alle User mit einer Rolle")
-            .addRoleOption(o =>
-                o.setName("role")
-                    .setDescription("Rolle auswählen")
-                    .setRequired(true)
-            )
+            .setDescription("Zeigt alle Rollen + Mitglieder")
     ].map(c => c.toJSON());
 
     const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -108,7 +136,7 @@ async function deploy() {
         { body: commands }
     );
 
-    console.log("✅ Commands registriert");
+    console.log("✅ Command registriert");
 }
 
 deploy();
