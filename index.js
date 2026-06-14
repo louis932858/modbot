@@ -4,7 +4,10 @@ const {
     SlashCommandBuilder,
     REST,
     Routes,
-    EmbedBuilder
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle
 } = require("discord.js");
 
 const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
@@ -19,7 +22,7 @@ const client = new Client({
     ]
 });
 
-/* ---------------- MEMORY (TEMP STORAGE) ---------------- */
+/* ---------------- MEMORY ---------------- */
 const guildConfig = new Map();
 
 /* ---------------- READY ---------------- */
@@ -27,45 +30,94 @@ client.once("clientReady", () => {
     console.log(`${client.user.tag} online`);
 });
 
-/* ---------------- COMMANDS ---------------- */
-client.on("interactionCreate", async (interaction) => {
+/* ---------------- HELPERS ---------------- */
+function getConfig(guildId) {
+    if (!guildConfig.has(guildId)) guildConfig.set(guildId, []);
+    return guildConfig.get(guildId);
+}
 
-    if (!interaction.isChatInputCommand()) return;
+/* ---------------- INTERACTIONS ---------------- */
+client.on("interactionCreate", async (interaction) => {
 
     const guildId = interaction.guild.id;
 
     /* ---------------- /CONFIG ---------------- */
-    if (interaction.commandName === "config") {
+    if (interaction.isChatInputCommand() && interaction.commandName === "config") {
 
-        const role = interaction.options.getRole("role");
+        await interaction.guild.roles.fetch();
 
-        if (!guildConfig.has(guildId)) {
-            guildConfig.set(guildId, []);
-        }
+        const roles = interaction.guild.roles.cache
+            .filter(r => r.name !== "@everyone")
+            .sort((a, b) => b.position - a.position);
 
-        const list = guildConfig.get(guildId);
+        const config = getConfig(guildId);
 
-        if (!list.includes(role.id)) {
-            list.push(role.id);
-        }
+        const rows = [];
+        let row = new ActionRowBuilder();
 
-        guildConfig.set(guildId, list);
+        let count = 0;
+
+        roles.forEach(role => {
+
+            const active = config.includes(role.id);
+
+            const btn = new ButtonBuilder()
+                .setCustomId(`role_${role.id}`)
+                .setLabel(`${active ? "✅" : "❌"} ${role.name}`)
+                .setStyle(active ? ButtonStyle.Success : ButtonStyle.Secondary);
+
+            row.addComponents(btn);
+            count++;
+
+            if (count === 5) {
+                rows.push(row);
+                row = new ActionRowBuilder();
+                count = 0;
+            }
+        });
+
+        if (row.components.length > 0) rows.push(row);
 
         return interaction.reply({
-            content: `⚙️ Rolle **${role.name}** wurde zur Liste hinzugefügt`,
+            content: "⚙️ Klicke auf Rollen um sie zu aktivieren/deaktivieren:",
+            components: rows,
             ephemeral: true
         });
     }
 
+    /* ---------------- BUTTON TOGGLE ---------------- */
+    if (interaction.isButton()) {
+
+        if (!interaction.customId.startsWith("role_")) return;
+
+        const roleId = interaction.customId.replace("role_", "");
+        const config = getConfig(interaction.guild.id);
+
+        if (config.includes(roleId)) {
+            guildConfig.set(
+                interaction.guild.id,
+                config.filter(r => r !== roleId)
+            );
+        } else {
+            config.push(roleId);
+            guildConfig.set(interaction.guild.id, config);
+        }
+
+        return interaction.update({
+            content: "⚙️ Config aktualisiert! /config erneut öffnen",
+            components: []
+        });
+    }
+
     /* ---------------- /LISTROLE ---------------- */
-    if (interaction.commandName === "listrole") {
+    if (interaction.isChatInputCommand() && interaction.commandName === "listrole") {
 
         await interaction.guild.members.fetch();
 
-        const allowedRoles = guildConfig.get(guildId) || [];
+        const config = getConfig(guildId);
 
-        if (allowedRoles.length === 0) {
-            return interaction.reply("❌ Keine Rollen konfiguriert. Nutze /config");
+        if (config.length === 0) {
+            return interaction.reply("❌ Keine Rollen aktiviert. Nutze /config");
         }
 
         const embed = new EmbedBuilder()
@@ -74,7 +126,7 @@ client.on("interactionCreate", async (interaction) => {
 
         let desc = "";
 
-        for (const roleId of allowedRoles) {
+        for (const roleId of config) {
 
             const role = interaction.guild.roles.cache.get(roleId);
             if (!role) continue;
@@ -96,11 +148,11 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     /* ---------------- /JOIN ---------------- */
-    if (interaction.commandName === "join") {
+    if (interaction.isChatInputCommand() && interaction.commandName === "join") {
 
-        const voiceChannel = interaction.member.voice.channel;
+        const voice = interaction.member.voice.channel;
 
-        if (!voiceChannel) {
+        if (!voice) {
             return interaction.reply({
                 content: "❌ Du bist in keinem Voice Channel!",
                 ephemeral: true
@@ -108,20 +160,19 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         joinVoiceChannel({
-            channelId: voiceChannel.id,
-            guildId: voiceChannel.guild.id,
-            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            channelId: voice.id,
+            guildId: voice.guild.id,
+            adapterCreator: voice.guild.voiceAdapterCreator,
             selfDeaf: false
         });
 
-        return interaction.reply(`🎧 Ich bin in **${voiceChannel.name}**`);
+        return interaction.reply(`🎧 Ich bin in **${voice.name}**`);
     }
 
     /* ---------------- /LEAVE ---------------- */
-    if (interaction.commandName === "leave") {
+    if (interaction.isChatInputCommand() && interaction.commandName === "leave") {
 
         const conn = getVoiceConnection(interaction.guild.id);
-
         if (conn) conn.destroy();
 
         return interaction.reply("👋 Voice verlassen");
@@ -134,16 +185,11 @@ async function deploy() {
     const commands = [
         new SlashCommandBuilder()
             .setName("config")
-            .setDescription("Füge eine Rolle zur Teamliste hinzu")
-            .addRoleOption(o =>
-                o.setName("role")
-                    .setDescription("Rolle auswählen")
-                    .setRequired(true)
-            ),
+            .setDescription("Team Rollen auswählen (Toggle Menü)"),
 
         new SlashCommandBuilder()
             .setName("listrole")
-            .setDescription("Zeigt konfigurierte Team Rollen"),
+            .setDescription("Zeigt aktive Team Rollen"),
 
         new SlashCommandBuilder()
             .setName("join")
