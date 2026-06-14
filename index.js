@@ -1,139 +1,98 @@
 const {
     Client,
     GatewayIntentBits,
-    PermissionsBitField,
-    ChannelType,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle
+    REST,
+    Routes,
+    SlashCommandBuilder
 } = require("discord.js");
 
-const { token } = require("./config");
+const {
+    joinVoiceChannel,
+    getVoiceConnection
+} = require("@discordjs/voice");
+
+const TOKEN = process.env.TOKEN;
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
-client.once("ready", () => {
-    console.log(`${client.user.tag} online`);
+client.once("ready", async () => {
+    console.log(`${client.user.tag} ist online!`);
+
+    try {
+        const app = await client.application.fetch();
+
+        const commands = [
+            new SlashCommandBuilder()
+                .setName("join")
+                .setDescription("Joint deinem Sprachkanal"),
+
+            new SlashCommandBuilder()
+                .setName("leave")
+                .setDescription("Verlässt den Sprachkanal")
+        ];
+
+        const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+        await rest.put(
+            Routes.applicationCommands(app.id),
+            {
+                body: commands.map(cmd => cmd.toJSON())
+            }
+        );
+
+        console.log("✅ Slash Commands registriert");
+    } catch (err) {
+        console.error(err);
+    }
 });
 
-/* ---------------- COMMANDS ---------------- */
-client.on("interactionCreate", async (interaction) => {
+client.on("interactionCreate", async interaction => {
 
-    if (interaction.isChatInputCommand()) {
+    if (!interaction.isChatInputCommand()) return;
 
-        // 🎫 Ticket Panel
-        if (interaction.commandName === "ticketpanel") {
+    if (interaction.commandName === "join") {
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId("ticket_open")
-                    .setLabel("🎫 Ticket erstellen")
-                    .setStyle(ButtonStyle.Primary)
-            );
+        const voiceChannel = interaction.member.voice.channel;
 
+        if (!voiceChannel) {
             return interaction.reply({
-                content: "Support Tickets",
-                components: [row]
-            });
-        }
-
-        // 🔨 BAN
-        if (interaction.commandName === "ban") {
-            if (!interaction.member.permissions.has(PermissionsBitField.Flags.BanMembers))
-                return interaction.reply({ content: "Keine Rechte", ephemeral: true });
-
-            const user = interaction.options.getMember("user");
-            await user.ban();
-
-            return interaction.reply("User gebannt");
-        }
-
-        // 👢 KICK
-        if (interaction.commandName === "kick") {
-            if (!interaction.member.permissions.has(PermissionsBitField.Flags.KickMembers))
-                return interaction.reply({ content: "Keine Rechte", ephemeral: true });
-
-            const user = interaction.options.getMember("user");
-            await user.kick();
-
-            return interaction.reply("User gekickt");
-        }
-
-        // ⏳ TIMEOUT
-        if (interaction.commandName === "timeout") {
-            const user = interaction.options.getMember("user");
-            const minutes = interaction.options.getInteger("minutes");
-
-            await user.timeout(minutes * 60000);
-            return interaction.reply("User getimeoutet");
-        }
-
-        // 🧹 CLEAR
-        if (interaction.commandName === "clear") {
-            const amount = interaction.options.getInteger("amount");
-
-            await interaction.channel.bulkDelete(amount, true);
-            return interaction.reply({ content: "Nachrichten gelöscht", ephemeral: true });
-        }
-    }
-
-    /* ---------------- TICKETS ---------------- */
-    if (interaction.isButton()) {
-
-        // 🎫 OPEN TICKET
-        if (interaction.customId === "ticket_open") {
-
-            const channel = await interaction.guild.channels.create({
-                name: `ticket-${interaction.user.username}`,
-                type: ChannelType.GuildText,
-                permissionOverwrites: [
-                    {
-                        id: interaction.guild.id,
-                        deny: [PermissionsBitField.Flags.ViewChannel]
-                    },
-                    {
-                        id: interaction.user.id,
-                        allow: [
-                            PermissionsBitField.Flags.ViewChannel,
-                            PermissionsBitField.Flags.SendMessages
-                        ]
-                    }
-                ]
-            });
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId("ticket_close")
-                    .setLabel("🔒 Ticket schließen")
-                    .setStyle(ButtonStyle.Danger)
-            );
-
-            await channel.send({
-                content: `Hallo ${interaction.user}, beschreibe dein Problem.`,
-                components: [row]
-            });
-
-            return interaction.reply({
-                content: `Ticket erstellt: ${channel}`,
+                content: "❌ Du musst in einem Sprachkanal sein.",
                 ephemeral: true
             });
         }
 
-        // 🔒 CLOSE TICKET
-        if (interaction.customId === "ticket_close") {
+        joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: voiceChannel.guild.id,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            selfDeaf: false
+        });
 
-            await interaction.reply("Ticket wird geschlossen...");
+        return interaction.reply(
+            `✅ Sprachkanal **${voiceChannel.name}** beigetreten.`
+        );
+    }
 
-            setTimeout(() => {
-                interaction.channel.delete();
-            }, 3000);
+    if (interaction.commandName === "leave") {
+
+        const connection = getVoiceConnection(interaction.guild.id);
+
+        if (!connection) {
+            return interaction.reply({
+                content: "❌ Ich bin in keinem Sprachkanal.",
+                ephemeral: true
+            });
         }
+
+        connection.destroy();
+
+        return interaction.reply("👋 Sprachkanal verlassen.");
     }
 });
 
-client.login(token);
+client.login(TOKEN);
