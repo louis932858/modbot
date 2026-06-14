@@ -1,5 +1,5 @@
 {
-  "name": "voice-bot",
+  "name": "autovoice-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -7,8 +7,6 @@
   },
   "dependencies": {
     "discord.js": "^14.21.0",
-    "@discordjs/voice": "^0.18.0",
-    "@discordjs/opus": "^0.9.0",
-    "ffmpeg-static": "^5.2.0"
+    "@discordjs/voice": "^0.18.0"
   }
 }
