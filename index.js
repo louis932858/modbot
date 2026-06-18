@@ -11,6 +11,9 @@ const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
 
 const TOKEN = process.env.TOKEN;
 
+// 👉 Admin Role ID (deine Rolle)
+const ADMIN_ROLE_ID = "1439241591041560576";
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -19,122 +22,69 @@ const client = new Client({
     ]
 });
 
-/* ---------------- MEMORY (TEMP STORAGE) ---------------- */
-const guildConfig = new Map();
-
-/* ---------------- NICKNAME SYSTEM ---------------- */
-async function updateNickname(member) {
-
-    if (member.user.bot) return;
-
-    const highestRole = member.roles.highest;
-
-    if (!highestRole || highestRole.name === "@everyone") return;
-
-let currentName = member.displayName;
-
-currentName = currentName.replace(/^.*? \| /, "");
-
-const nickname = `${highestRole.name} | ${currentName}`;
-
-    try {
-        if (member.manageable) {
-            await member.setNickname(nickname);
-        }
-    } catch (err) {
-        console.log(`Nickname Fehler bei ${member.user.tag}: ${err.message}`);
-    }
-}
-
 /* ---------------- READY ---------------- */
-client.once("clientReady", async () => {
+client.once("ready", async () => {
     console.log(`${client.user.tag} online`);
 
     for (const guild of client.guilds.cache.values()) {
-        await guild.members.fetch();
-
-        for (const member of guild.members.cache.values()) {
-            await updateNickname(member);
-        }
+        await updateNicknames(guild);
     }
 });
 
-/* ---------------- AUTO UPDATE ---------------- */
-client.on("guildMemberUpdate", async (oldMember, newMember) => {
-    await updateNickname(newMember);
-});
+/* ---------------- NICKNAME SYSTEM ---------------- */
+async function updateNicknames(guild) {
+    await guild.members.fetch();
 
-client.on("guildMemberAdd", async (member) => {
-    await updateNickname(member);
+    for (const member of guild.members.cache.values()) {
+
+        if (member.user.bot) continue;
+        if (!member.manageable) continue;
+
+        // höchste Rolle finden (inkl. Admin override)
+        let highestRole = member.roles.highest;
+
+        // Admin Priorität erzwingen
+        if (member.roles.cache.has(ADMIN_ROLE_ID)) {
+            highestRole = member.guild.roles.cache.get(ADMIN_ROLE_ID);
+        }
+
+        if (!highestRole || highestRole.name === "@everyone") continue;
+
+        const newNick = `[${highestRole.name}] ${member.user.username}`;
+
+        try {
+            await member.setNickname(newNick);
+        } catch (err) {
+            console.log(`Nickname Fehler bei ${member.user.tag}`);
+        }
+    }
+}
+
+/* ---------------- ROLE UPDATE LIVE ---------------- */
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+
+    if (newMember.user.bot) return;
+    if (!newMember.manageable) return;
+
+    let highestRole = newMember.roles.highest;
+
+    if (newMember.roles.cache.has(ADMIN_ROLE_ID)) {
+        highestRole = newMember.guild.roles.cache.get(ADMIN_ROLE_ID);
+    }
+
+    if (!highestRole || highestRole.name === "@everyone") return;
+
+    const newNick = `[${highestRole.name}] ${newMember.user.username}`;
+
+    try {
+        await newMember.setNickname(newNick);
+    } catch (err) {}
 });
 
 /* ---------------- COMMANDS ---------------- */
 client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isChatInputCommand()) return;
-
-    const guildId = interaction.guild.id;
-
-    /* ---------------- /CONFIG ---------------- */
-    if (interaction.commandName === "config") {
-
-        const role = interaction.options.getRole("role");
-
-        if (!guildConfig.has(guildId)) {
-            guildConfig.set(guildId, []);
-        }
-
-        const list = guildConfig.get(guildId);
-
-        if (!list.includes(role.id)) {
-            list.push(role.id);
-        }
-
-        guildConfig.set(guildId, list);
-
-        return interaction.reply({
-            content: `⚙️ Rolle **${role.name}** wurde zur Liste hinzugefügt`,
-            ephemeral: true
-        });
-    }
-
-    /* ---------------- /LISTROLE ---------------- */
-    if (interaction.commandName === "listrole") {
-
-        await interaction.guild.members.fetch();
-
-        const allowedRoles = guildConfig.get(guildId) || [];
-
-        if (allowedRoles.length === 0) {
-            return interaction.reply("❌ Keine Rollen konfiguriert. Nutze /config");
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle("📋 Team Rollen Übersicht")
-            .setColor("Blue");
-
-        let desc = "";
-
-        for (const roleId of allowedRoles) {
-
-            const role = interaction.guild.roles.cache.get(roleId);
-            if (!role) continue;
-
-            const members = role.members.map(m => m.user.tag);
-
-            desc += `\n**🔹 ${role.name} (${role.members.size})**\n`;
-
-            if (members.length > 0) {
-                desc += members.map(u => `• ${u}`).join("\n") + "\n";
-            } else {
-                desc += "• Niemand\n";
-            }
-        }
-
-        embed.setDescription(desc || "Keine Daten");
-
-        return interaction.reply({ embeds: [embed] });
-    }
 
     /* ---------------- /JOIN ---------------- */
     if (interaction.commandName === "join") {
@@ -162,33 +112,19 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.commandName === "leave") {
 
         const conn = getVoiceConnection(interaction.guild.id);
-
         if (conn) conn.destroy();
 
         return interaction.reply("👋 Voice verlassen");
     }
 });
 
-/* ---------------- REGISTER COMMANDS ---------------- */
+/* ---------------- DEPLOY COMMANDS ---------------- */
 async function deploy() {
 
     const commands = [
         new SlashCommandBuilder()
-            .setName("config")
-            .setDescription("Füge eine Rolle zur Teamliste hinzu")
-            .addRoleOption(o =>
-                o.setName("role")
-                    .setDescription("Rolle auswählen")
-                    .setRequired(true)
-            ),
-
-        new SlashCommandBuilder()
-            .setName("listrole")
-            .setDescription("Zeigt konfigurierte Team Rollen"),
-
-        new SlashCommandBuilder()
             .setName("join")
-            .setDescription("Bot joint deinen Voice Channel"),
+            .setDescription("Bot joint Voice Channel"),
 
         new SlashCommandBuilder()
             .setName("leave")
