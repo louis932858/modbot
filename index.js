@@ -31,7 +31,11 @@ async function updateNickname(member) {
 
     if (!highestRole || highestRole.name === "@everyone") return;
 
-    const nickname = `[${highestRole.name}] ${member.user.username}`;
+let currentName = member.displayName;
+
+currentName = currentName.replace(/^.*? \| /, "");
+
+const nickname = `${highestRole.name} | ${currentName}`;
 
     try {
         if (member.manageable) {
