@@ -22,9 +22,46 @@ const client = new Client({
 /* ---------------- MEMORY (TEMP STORAGE) ---------------- */
 const guildConfig = new Map();
 
+/* ---------------- NICKNAME SYSTEM ---------------- */
+async function updateNickname(member) {
+
+    if (member.user.bot) return;
+
+    const highestRole = member.roles.highest;
+
+    if (!highestRole || highestRole.name === "@everyone") return;
+
+    const nickname = `[${highestRole.name}] ${member.user.username}`;
+
+    try {
+        if (member.manageable) {
+            await member.setNickname(nickname);
+        }
+    } catch (err) {
+        console.log(`Nickname Fehler bei ${member.user.tag}: ${err.message}`);
+    }
+}
+
 /* ---------------- READY ---------------- */
-client.once("clientReady", () => {
+client.once("clientReady", async () => {
     console.log(`${client.user.tag} online`);
+
+    for (const guild of client.guilds.cache.values()) {
+        await guild.members.fetch();
+
+        for (const member of guild.members.cache.values()) {
+            await updateNickname(member);
+        }
+    }
+});
+
+/* ---------------- AUTO UPDATE ---------------- */
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+    await updateNickname(newMember);
+});
+
+client.on("guildMemberAdd", async (member) => {
+    await updateNickname(member);
 });
 
 /* ---------------- COMMANDS ---------------- */
